@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>데이터베이스 CRUD 테스트</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5rem;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .card h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 600;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(17, 153, 142, 0.4);
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        .btn-warning:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(240, 147, 251, 0.4);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(250, 112, 154, 0.4);
+        }
+
+        .items-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .item-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 20px;
+            border-radius: 12px;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .item-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .item-card h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .item-card p {
+            color: #555;
+            margin-bottom: 8px;
+        }
+
+        .item-actions {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1.8rem;
+            }
+
+            .items-list {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🗄️ 데이터베이스 CRUD 테스트</h1>
+
+        <div id="status" class="status hidden"></div>
+
+        <!-- PERFORMANCE TESTS -->
+        <div class="card">
+            <h2>⚡ 성능 테스트</h2>
+            <p>CPU 및 데이터베이스 성능을 측정합니다. (결과는 자동으로 DB에 저장됩니다)</p>
+
+            <div class="row">
+                <button class="btn btn-primary" onclick="runCPUTest()">🖥️ CPU 단일 스레드</button>
+                <button class="btn btn-primary" onclick="runCPUMultiTest()">🖥️ CPU 다중 스레드</button>
+                <button class="btn btn-success" onclick="runDBReadTest()">📖 DB 읽기 테스트</button>
+                <button class="btn btn-warning" onclick="runDBWriteTest()">✍️ DB 쓰기 테스트</button>
+            </div>
+
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+                <h3>🔄 종합 부하 테스트 (Batch)</h3>
+                <p>모든 테스트를 10회 반복 실행하여 평균 성능을 측정합니다. (테스트 간 5초, 세트 간 10초 대기)</p>
+                <!-- 종합 부하 테스트 -->
+                <div class="card" style="background: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%); color: white;">
+                    <h2>🔥 종합 부하 테스트 (Batch Test)</h2>
+                    <p>CPU, DB 읽기/쓰기 테스트를 순차적으로 실행하여 시스템 전반의 성능을 측정합니다.</p>
+                    <div id="batch-progress" style="display: none; margin-top: 15px;">
+                        <div class="progress-bar">
+                            <div id="batch-progress-bar" class="progress-fill" style="width: 0%"></div>
+                        </div>
+                        <p id="batch-status" style="margin-top: 10px; font-size: 14px; font-weight: bold;"></p>
+                    </div>
+                    <button class="btn" onclick="runBatchTest()"
+                        style="background: white; color: #6c5ce7; margin-top: 15px;">
+                        종합 테스트 시작
+                    </button>
+                </div>
+
+                <div class="grid">
+                    <!-- CPU Test -->
+                    <div class="card">
+                        <h2>🖥️ CPU Benchmark</h2>
+                        <div class="test-controls">
+                            <button class="btn btn-primary" onclick="runCPUTest()">Single Thread</button>
+                            <button class="btn btn-primary" onclick="runCPUMultiTest()">Multi Thread</button>
+                        </div>
+                    </div>
+
+                    <!-- DB Test -->
+                    <div class="card">
+                        <h2>💾 Database Benchmark</h2>
+                        <div class="test-controls">
+                            <button class="btn btn-success" onclick="runDBReadTest()">DB Read Test</button>
+                            <button class="btn btn-warning" onclick="runDBWriteTest()">DB Write Test</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Test History -->
+                <div class="card">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h2>📊 Test History</h2>
+                        <button class="btn btn-danger" onclick="clearAllTests()"
+                            style="padding: 8px 15px; font-size: 14px;">
+                            전체 기록 삭제
+                        </button>
+                    </div>
+                    <div id="perf-results" class="result-grid">
+                        <!-- Results will be loaded here -->
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                const API_BASE = window.location.origin;
+
+                let statusTimeout;
+                function showStatus(message, type = 'info', duration = 5000) {
+                    const status = document.getElementById('status');
+                    status.textContent = message;
+                    status.className = `status ${type}`;
+                    status.classList.remove('hidden');
+
+                    if (statusTimeout) {
+                        clearTimeout(statusTimeout);
+                    }
+
+                    if (duration > 0) {
+                        statusTimeout = setTimeout(() => {
+                            status.classList.add('hidden');
+                        }, duration);
+                    }
+                }
+
+                // 페이지 로드시 아이템 자동 로드
+                window.onload = () => {
+                    // loadItems(); // Removed
+                    loadPerfHistory();
+                };
+
+                // ===== Performance Tests =====
+
+                function showPerfResult(data) {
+                    const testType = data.test_type || data.test;
+                    const testLabel = {
+                        'CPU': '🖥️ CPU 단일',
+                        'CPU_MULTI': '🖥️ CPU 다중',
+                        'DB_READ': '📖 DB 읽기',
+                        'DB_WRITE': '✍️ DB 쓰기',
+                        'CPU_AVG': '📊 CPU 단일 (평균)',
+                        'CPU_MULTI_AVG': '📊 CPU 다중 (평균)',
+                        'DB_READ_AVG': '📊 DB 읽기 (평균)',
+                        'DB_WRITE_AVG': '📊 DB 쓰기 (평균)',
+                        'CPU Benchmark': '🖥️ CPU 단일',
+                        'CPU Multi-Thread Benchmark': '🖥️ CPU 다중',
+                        'Database Read': '📖 DB 읽기',
+                        'Database Write': '✍️ DB 쓰기'
+                    }[testType] || testType;
+
+                    const details = typeof data.details === 'string' ? JSON.parse(data.details) : data.details || {};
+                    const createdAt = data.created_at ? new Date(data.created_at).toLocaleString('ko-KR') : '방금';
+
+                    return `
+                <div class="item-card" style="background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);">
+                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                        <div style="flex: 1;">
+                            <h3 style="color: #c0392b; margin-bottom: 10px;">${testLabel}</h3>
+                            <p style="font-size: 12px; color: #888; margin-bottom: 10px;">
+                                🕐 ${createdAt}
+                            </p>
+                            <p><strong>반복:</strong> ${(data.iterations || 0).toLocaleString()}</p>
+                            ${details.threads ? `<p><strong>스레드:</strong> ${details.threads}</p>` : ''}
+                            ${details.primesFound ? `<p><strong>소수:</strong> ${details.primesFound.toLocaleString()}</p>` : ''}
+                            ${details.totalRowsRead ? `<p><strong>읽은 행:</strong> ${details.totalRowsRead.toLocaleString()}</p>` : ''}
+                            ${details.rowsInserted ? `<p><strong>삽입 행:</strong> ${details.rowsInserted.toLocaleString()}</p>` : ''}
+                            <p><strong>소요 시간:</strong> ${(data.duration_ms || data.duration) / 1000}초 (${data.duration_ms || data.duration}ms)</p>
+                            <p><strong>처리량:</strong> ${(data.throughput || 0).toLocaleString()}/초</p>
+                            ${details.avgQueryTime ? `<p><strong>평균 쿼리:</strong> ${details.avgQueryTime}ms</p>` : ''}
+                        </div>
+                        ${data.id ? `
+                            <button class="btn btn-danger" onclick="deleteTest(${data.id})" style="margin-left: 10px; padding: 8px 12px; font-size: 12px;">
+                                🗑️
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+                }
+
+                // 테스트 내역 로드
+                async function loadPerfHistory() {
+                    try {
+                        const response = await fetch(`${API_BASE}/api/performance/history?limit=50`);
+                        const data = await response.json();
+
+                        const container = document.getElementById('perf-results');
+
+                        if (data.success && data.data.length > 0) {
+                            container.innerHTML = data.data.map(test => showPerfResult(test)).join('');
+                        } else {
+                            container.innerHTML = '<p style="text-align: center; color: #888; padding: 20px;">테스트 내역이 없습니다.</p>';
+                        }
+                    } catch (error) {
+                        console.error('Failed to load history:', error);
+                    }
+                }
+
+                // 개별 테스트 삭제
+                async function deleteTest(id) {
+                    if (!confirm('이 테스트 결과를 삭제하시겠습니까?')) return;
+
+                    try {
+                        const response = await fetch(`${API_BASE}/api/performance/${id}`, {
+                            method: 'DELETE'
+                        });
+
+                        const data = await response.json();
+
+                        if (data.success) {
+                            showStatus('✅ 테스트 결과 삭제 완료', 'success');
+                            loadPerfHistory();
+                        } else {
+                            showStatus(`❌ 삭제 실패: ${data.error}`, 'error');
+                        }
+                    } catch (error) {
+                        showStatus(`❌ 오류: ${error.message}`, 'error');
+                    }
+                }
+
+                // 전체 테스트 삭제
+                async function clearAllTests() {
+                    if (!confirm('모든 테스트 결과를 삭제하시겠습니까?')) return;
+
+                    try {
+                        const response = await fetch(`${API_BASE}/api/performance`, {
+                            method: 'DELETE'
+                        });
+
+                        const data = await response.json();
+
+                        if (data.success) {
+                            showStatus(`✅ 전체 테스트 결과 삭제 완료 (${data.deletedCount}개)`, 'success');
+                            loadPerfHistory();
+                        } else {
+                            showStatus(`❌ 삭제 실패: ${data.error}`, 'error');
+                        }
+                    } catch (error) {
+                        showStatus(`❌ 오류: ${error.message}`, 'error');
+                    }
+                }
+
+                // Helper for Chunked Execution
+                async function runChunkedTest(testType, iterations, threads = 1, onProgress) {
+                    const CHUNK_SIZE = 10000; // DB 테스트는 1만 번씩 분할
+
+                    const effectiveChunkSize = testType.startsWith('CPU') ? 10000000 : 10000;
+                    const numChunks = Math.ceil(iterations / effectiveChunkSize);
+
+                    let totalDuration = 0;
+                    let totalPrimes = 0; // CPU only
+                    let totalRowsRead = 0; // DB Read only
+                    let totalRowsInserted = 0; // DB Write only
+
+                    for (let i = 0; i < numChunks; i++) {
+                        const currentIterations = Math.min(effectiveChunkSize, iterations - (i * effectiveChunkSize));
+                        if (onProgress) onProgress(i + 1, numChunks);
+
+                        let endpoint = '';
+                        let method = 'GET';
+                        let body = null;
+                        const params = new URLSearchParams({ skip_save: 'true' });
+
+                        if (testType === 'CPU') {
+                            endpoint = '/api/performance/cpu';
+                            params.append('iterations', currentIterations);
+                        } else if (testType === 'CPU_MULTI') {
+                            endpoint = '/api/performance/cpu-multi';
+                            params.append('iterations', currentIterations);
+                            params.append('threads', threads);
+                        } else if (testType === 'DB_READ') {
+                            endpoint = '/api/performance/db-read';
+                            params.append('iterations', currentIterations);
+                            params.append('threads', threads);
+                        } else if (testType === 'DB_WRITE') {
+                            endpoint = '/api/performance/db-write';
+                            method = 'POST';
+                            body = JSON.stringify({ iterations: currentIterations, threads: threads });
+                        }
+
+                        const options = { method };
+                        if (body) {
+                            options.headers = { 'Content-Type': 'application/json' };
+                            options.body = body;
+                        }
+
+                        const response = await fetch(`${API_BASE}${endpoint}?${params}`, options);
+                        const data = await response.json();
+
+                        if (!data.success) throw new Error(data.error);
+
+                        totalDuration += data.duration;
+                        if (data.primesFound) totalPrimes += data.primesFound;
+                        if (data.rowsRead) totalRowsRead += data.rowsRead; // DB Read response usually has rowsRead or totalRowsRead? 
+                        // server.js for DB_READ returns: totalRowsRead: totalRows. Wait, let's check server.js again.
+                        // It returns: { ..., details: { totalRowsRead: ... } } but the flat response might differ.
+                        // In step 1241/1288, DB_READ res.json includes: { ..., totalRowsRead: totalRows, ... }
+                        // Actually, let's check step 1288 diff again.
+                        // It returns `res.json(result)`. `result` is constructed before saving.
+                        // const result = { success: true, ..., totalRowsRead: totalRows, ... };
+                        // So yes, totalRowsRead is at top level.
+                        if (data.totalRowsRead) totalRowsRead += data.totalRowsRead;
+
+                        if (data.rowsInserted) totalRowsInserted += data.rowsInserted;
+                    }
+
+                    return {
+                        duration: totalDuration,
+                        primesFound: totalPrimes,
+                        rowsRead: totalRowsRead,
+                        rowsInserted: totalRowsInserted,
+                        chunks: numChunks
+                    };
+                }
+
+                // CPU 단일 스레드 벤치마크 (Chunked Execution)
+                async function runCPUTest() {
+                    const input = prompt('반복 횟수 (기본: 100,000,000):', '100000000');
+                    if (input === null) return; // 취소 시 중단
+                    const iterations = parseInt(input) || 100000000;
+
+                    showStatus(`🖥️ CPU 단일 스레드 벤치마크 준비 중... (총 ${iterations.toLocaleString()}회)`, 'info', 0);
+
+                    try {
+                        const result = await runChunkedTest('CPU', iterations, 1, (current, total) => {
+                            showStatus(`🖥️ CPU 단일 테스트 진행 중... [${current}/${total}]`, 'info', 0);
+                        });
+
+                        // 최종 결과 저장
+                        await saveBatchResult('CPU', iterations, result.duration, { primesFound: result.primesFound, chunks: result.chunks });
+
+                        showStatus(`✅ CPU 단일 테스트 완료! (${(result.duration / 1000).toFixed(3)}초)`, 'success');
+                        loadPerfHistory();
+
+                    } catch (error) {
+                        showStatus(`❌ 테스트 실패: ${error.message}`, 'error');
+                    }
+                }
+
+                // CPU 다중 스레드 벤치마크 (Chunked Execution)
+                async function runCPUMultiTest() {
+                    const inputIter = prompt('반복 횟수 (기본: 100,000,000):', '100000000');
+                    if (inputIter === null) return;
+                    const iterations = parseInt(inputIter) || 100000000;
+
+                    const inputThreads = prompt('스레드 수 (기본: 4):', '4');
+                    if (inputThreads === null) return;
+                    const threads = parseInt(inputThreads) || 4;
+
+                    showStatus(`🖥️ CPU 다중 스레드 (${threads}개) 벤치마크 준비 중...`, 'info', 0);
+
+                    try {
+                        const result = await runChunkedTest('CPU_MULTI', iterations, threads, (current, total) => {
+                            showStatus(`🖥️ CPU 다중 테스트 진행 중... [${current}/${total}]`, 'info', 0);
+                        });
+
+                        // 최종 결과 저장
+                        await saveBatchResult('CPU_MULTI', iterations, result.duration, { threads, primesFound: result.primesFound, chunks: result.chunks });
+
+                        showStatus(`✅ CPU 다중 테스트 완료! (${(result.duration / 1000).toFixed(3)}초, ${threads}스레드)`, 'success');
+                        loadPerfHistory();
+
+                    } catch (error) {
+                        showStatus(`❌ 테스트 실패: ${error.message}`, 'error');
+                    }
+                }
+
+                // DB 읽기 테스트 (Chunked Execution)
+                async function runDBReadTest() {
+                    const inputIter = prompt('반복 횟수 (기본: 50,000):', '50000');
+                    if (inputIter === null) return;
+                    const iterations = parseInt(inputIter) || 50000;
+
+                    const inputThreads = prompt('스레드 수 (기본: 4):', '4');
+                    if (inputThreads === null) return;
+                    const threads = parseInt(inputThreads) || 4;
+
+                    showStatus(`📖 DB 읽기 테스트 준비 중... (${threads}스레드)`, 'info', 0);
+
+                    try {
+                        const result = await runChunkedTest('DB_READ', iterations, threads, (current, total) => {
+                            showStatus(`📖 DB 읽기 테스트 진행 중... [${current}/${total}]`, 'info', 0);
+                        });
+
+                        // 최종 결과 저장
+                        await saveBatchResult('DB_READ', iterations, result.duration, { threads, totalRowsRead: result.rowsRead, chunks: result.chunks });
+
+                        showStatus(`✅ DB 읽기 테스트 완료! (${(result.duration / 1000).toFixed(3)}초)`, 'success');
+                        loadPerfHistory();
+
+                    } catch (error) {
+                        showStatus(`❌ 테스트 실패: ${error.message}`, 'error');
+                    }
+                }
+
+                // DB 쓰기 테스트 (Chunked Execution)
+                async function runDBWriteTest() {
+                    const inputIter = prompt('반복 횟수 (기본: 5,000):', '5000');
+                    if (inputIter === null) return;
+                    const iterations = parseInt(inputIter) || 5000;
+
+                    const inputThreads = prompt('스레드 수 (기본: 4):', '4');
+                    if (inputThreads === null) return;
+                    const threads = parseInt(inputThreads) || 4;
+
+                    showStatus(`✍️ DB 쓰기 테스트 준비 중... (${threads}스레드, 자동 정리됨)`, 'info', 0);
+
+                    try {
+                        const result = await runChunkedTest('DB_WRITE', iterations, threads, (current, total) => {
+                            showStatus(`✍️ DB 쓰기 테스트 진행 중... [${current}/${total}]`, 'info', 0);
+                        });
+
+                        // 최종 결과 저장
+                        await saveBatchResult('DB_WRITE', iterations, result.duration, { threads, rowsInserted: result.rowsInserted, chunks: result.chunks });
+
+                        showStatus(`✅ DB 쓰기 테스트 완료! (${(result.duration / 1000).toFixed(3)}초)`, 'success');
+                        loadPerfHistory();
+                        // loadItems(); // Removed
+
+                    } catch (error) {
+                        showStatus(`❌ 테스트 실패: ${error.message}`, 'error');
+                    }
+                }
+
+                // ===== Batch Test Logic =====
+
+                const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+                async function runBatchTest() {
+                    if (!confirm('종합 부하 테스트를 시작하시겠습니까?\n총 10세트가 실행되며 시간이 다소 소요됩니다.')) return;
+
+                    const batchStatus = document.getElementById('batch-status');
+                    const progressBar = document.getElementById('batch-progress-bar');
+                    const progressContainer = document.getElementById('batch-progress');
+
+                    batchStatus.style.display = 'block';
+                    progressContainer.style.display = 'block';
+
+                    // 기본 설정값
+                    const SETS = 10;
+                    const TEST_INTERVAL = 5000; // 5초
+                    const SET_INTERVAL = 10000; // 10초
+
+                    // 테스트 파라미터
+                    const cpuIterations = 100000000;
+                    const cpuThreads = 4;
+                    const dbReadIterations = 50000;
+                    const dbReadThreads = 4;
+                    const dbWriteIterations = 5000;
+                    const dbWriteThreads = 4;
+
+                    // 결과 수집용
+                    const results = {
+                        'CPU_SINGLE': [],
+                        'CPU_MULTI': [],
+                        'DB_READ': [],
+                        'DB_WRITE': []
+                    };
+
+                    try {
+                        for (let set = 1; set <= SETS; set++) {
+                            // Progress 업데이트
+                            const progress = ((set - 1) / SETS) * 100;
+                            progressBar.style.width = `${progress}%`;
+
+                            // 1. CPU Single (Chunked)
+                            batchStatus.textContent = `[Set ${set}/${SETS}] CPU 단일 스레드 테스트 중...`;
+                            const cpuSingleRes = await runChunkedTest('CPU', cpuIterations, 1);
+                            results['CPU_SINGLE'].push(cpuSingleRes.duration);
+                            await sleep(TEST_INTERVAL);
+
+                            // 2. CPU Multi (Chunked)
+                            batchStatus.textContent = `[Set ${set}/${SETS}] CPU 다중 스레드 테스트 중...`;
+                            const cpuMultiRes = await runChunkedTest('CPU_MULTI', cpuIterations, cpuThreads);
+                            results['CPU_MULTI'].push(cpuMultiRes.duration);
+                            await sleep(TEST_INTERVAL);
+
+                            // 3. DB Read (Chunked)
+                            batchStatus.textContent = `[Set ${set}/${SETS}] DB 읽기 테스트 중 (${dbReadThreads}스레드)...`;
+                            const dbReadRes = await runChunkedTest('DB_READ', dbReadIterations, dbReadThreads);
+                            results['DB_READ'].push(dbReadRes.duration);
+                            await sleep(TEST_INTERVAL);
+
+                            // 4. DB Write (Chunked)
+                            batchStatus.textContent = `[Set ${set}/${SETS}] DB 쓰기 테스트 중 (${dbWriteThreads}스레드)...`;
+                            const dbWriteRes = await runChunkedTest('DB_WRITE', dbWriteIterations, dbWriteThreads);
+                            results['DB_WRITE'].push(dbWriteRes.duration);
+
+                            // 세트 간 대기 (마지막 세트 제외)
+                            if (set < SETS) {
+                                batchStatus.textContent = `[Set ${set}/${SETS}] 완료. 다음 세트 대기 중 (${SET_INTERVAL / 1000}초)...`;
+                                await sleep(SET_INTERVAL);
+                            }
+                        }
+
+                        progressBar.style.width = '100%';
+                        batchStatus.textContent = '모든 테스트 완료! 결과 집계 및 저장 중...';
+
+                        // 평균 계산 및 저장 (이전과 동일)
+                        const cpuSingleAvg = results['CPU_SINGLE'].reduce((a, b) => a + b, 0) / results['CPU_SINGLE'].length;
+                        await saveBatchResult('CPU_AVG', cpuIterations, cpuSingleAvg, { sets: SETS, raw_durations: results['CPU_SINGLE'] });
+
+                        const cpuMultiAvg = results['CPU_MULTI'].reduce((a, b) => a + b, 0) / results['CPU_MULTI'].length;
+                        await saveBatchResult('CPU_MULTI_AVG', cpuIterations, cpuMultiAvg, { sets: SETS, threads: cpuThreads, raw_durations: results['CPU_MULTI'] });
+
+                        const dbReadAvg = results['DB_READ'].reduce((a, b) => a + b, 0) / results['DB_READ'].length;
+                        await saveBatchResult('DB_READ_AVG', dbReadIterations, dbReadAvg, { sets: SETS, threads: dbReadThreads, raw_durations: results['DB_READ'] });
+
+                        const dbWriteAvg = results['DB_WRITE'].reduce((a, b) => a + b, 0) / results['DB_WRITE'].length;
+                        await saveBatchResult('DB_WRITE_AVG', dbWriteIterations, dbWriteAvg, { sets: SETS, threads: dbWriteThreads, raw_durations: results['DB_WRITE'] });
+
+                        batchStatus.textContent = '✅ 종합 테스트 완료! 결과가 저장되었습니다.';
+                        showStatus('✅ 종합 부하 테스트 완료', 'success');
+                        loadPerfHistory();
+                        // loadItems(); // Removed
+
+                    } catch (error) {
+                        console.error('Batch test failed:', error);
+                        batchStatus.textContent = `❌ 테스트 중단: ${error.message}`;
+                        batchStatus.style.color = 'red';
+                    } finally {
+                        setTimeout(() => {
+                            batchStatus.style.display = 'none';
+                            progressContainer.style.display = 'none';
+                            progressBar.style.width = '0%';
+                            batchStatus.style.color = '#6c5ce7'; // Reset color
+                        }, 10000); // 결과 확인을 위해 10초로 연장
+                    }
+                }
+
+                async function saveBatchResult(testType, iterations, durationMs, details) {
+                    try {
+                        await fetch(`${API_BASE}/api/performance/result`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                test_type: testType,
+                                iterations: iterations,
+                                duration_ms: Math.round(durationMs),
+                                throughput: Math.round(iterations / (durationMs / 1000)),
+                                details: details
+                            })
+                        });
+                    } catch (error) {
+                        console.error(`Failed to save ${testType} result:`, error);
+                    }
+                }
+            </script>
+</body>
+
+</html>

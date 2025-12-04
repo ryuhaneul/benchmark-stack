@@ -1,0 +1,36 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Node modules
+node_modules/
+
+# Docker volumes
+mysql_data/
+acme_dns_data/
+
+# SSL certificates (shouldn't be committed)
+nginx/certs/*.pem
+nginx/certs/*.key
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Kubernetes secrets (use secret.example.yml instead)
+k8s/secret.yml

@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: test-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+      MYSQL_USER: ${MYSQL_USER:-testuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-testpassword}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./app/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      - "3306:3306"
+    networks:
+      - app-network
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Node.js Web Application
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: ${REGISTRY_URL:-test-stack}/${IMAGE_NAME:-app}:${IMAGE_TAG:-v1}
+    container_name: test-app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${MYSQL_DATABASE:-testdb}
+      DB_USER: ${MYSQL_USER:-testuser}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-testpassword}
+      APP_PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - app-network
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Nginx Reverse Proxy
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: test-nginx
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+      USE_LETSENCRYPT: ${USE_LETSENCRYPT:-false}
+      USE_ACME_DNS: ${USE_ACME_DNS:-false}
+      ACME_DNS_API_URL: ${ACME_DNS_API_URL:-http://acme-dns:8080}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/certs:/etc/nginx/certs
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - app
+    networks:
+      - app-network
+    healthcheck:
+      test: [ "CMD", "nginx", "-t" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # acme-dns for DNS-01 challenges (optional)
+  acme-dns:
+    image: joohoi/acme-dns:latest
+    container_name: acme-dns
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"
+      - "8080:8080"
+    volumes:
+      - acme_dns_data:/var/lib/acme-dns
+      - ./acme-dns/config.cfg:/etc/acme-dns/config.cfg
+    networks:
+      - app-network
+    profiles:
+      - acme-dns
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local
+  acme_dns_data:
+    driver: local
