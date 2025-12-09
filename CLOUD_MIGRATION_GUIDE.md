@@ -169,6 +169,21 @@ docker push $REGISTRY_URL/$IMAGE_NAME:$IMAGE_TAG
 
 ---
 
+### 3.5 [로컬] Kubernetes Image Pull Secret 생성
+
+Kubernetes가 비공개 레지스트리에서 이미지를 가져올 수 있도록 접속 정보를 담은 Secret을 생성합니다.
+(이미지 푸시를 위해 설정했던 환경변수를 그대로 사용합니다.)
+
+```bash
+kubectl create secret docker-registry regcred \
+  --docker-server=$REGISTRY_URL \
+  --docker-username=$REGISTRY_USER \
+  --docker-password=$REGISTRY_PASSWORD \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+---
+
 ## 4. 데이터베이스 설정
 
 운영 환경에 맞게 다음 두 가지 옵션 중 하나를 선택하여 진행합니다.
@@ -235,108 +250,17 @@ mysql -h <DB_HOST> -P <DB_PORT> -u <DB_USER> -p < testdb_backup.sql
 
 #### 4.B.1 스토리지 설정 (StorageClass & PVC)
 
-NHN Cloud NKS 등 일부 환경에서는 스토리지 클래스를 명시적으로 생성해야 합니다.
-**주의:** 작업을 시작하기 전에 NHN Cloud 콘솔의 클러스터 설정에서 **'Block Storage CSI Driver'** 애드온이 설치되어 있는지 반드시 확인하세요.
+NHN Cloud(NKS)와 Gabia Cloud(GKS) 환경에 맞춰 이미 `k8s/overlays` 디렉토리에 스토리지 설정이 완료되어 있습니다.
+Kustomize를 사용하여 배포 시 자동으로 적절한 스토리지 클래스가 적용됩니다.
 
-**0. CSI 드라이버 확인**
-```bash
-kubectl get csidrivers
-# 결과에 'cinder.csi.openstack.org'가 보여야 합니다.
-# 보이지 않는다면 웹 콘솔에서 해당 애드온을 설치해주세요.
-```
+- **NKS**: `k8s/overlays/nks/storage-class.yml` (`general-bs`)
+- **GKS**: `k8s/overlays/gks/kustomization.yaml` (`ssd-iscsi` 패치)
 
-**1. 스토리지 클래스 생성 (`k8s/storage-class.yml`)**
-(`k8s/storage-class.yml` 파일이 이미 생성되어 있습니다.)
+#### 4.B.2 배포 및 데이터 설정
 
-```yaml
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: general-bs
-provisioner: cinder.csi.openstack.org
-volumeBindingMode: WaitForFirstConsumer
-allowVolumeExpansion: true
-parameters:
-  type: General SSD
-```
+MySQL 파드를 띄워서 데이터를 넣기 위해, 애플리케이션 스택 전체를 먼저 배포합니다.
 
-**2. PVC 생성 (`k8s/mysql-pvc.yml`)**
-(`k8s/mysql-pvc.yml` 파일이 이미 생성되어 있습니다. `storageClassName`이 추가되었습니다.)
-
-```yaml
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: mysql-pvc
-spec:
-  storageClassName: general-bs  # 추가됨
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
-```
-
-#### 4.B.2 MySQL 배포 및 서비스 설정
-
-(`k8s/mysql-deployment.yml` 파일이 이미 생성되어 있습니다. 내용은 아래와 같습니다.)
-
-**`k8s/mysql-deployment.yml`:**
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: mysql
-spec:
-  selector:
-    matchLabels:
-      app: mysql
-  strategy:
-    type: Recreate
-  template:
-    metadata:
-      labels:
-        app: mysql
-    spec:
-      containers:
-      - image: mysql:8.0
-        name: mysql
-        env:
-        - name: MYSQL_ROOT_PASSWORD
-          value: rootpassword  # 실제 운영 시 Secret 사용 권장
-        - name: MYSQL_DATABASE
-          value: testdb
-        - name: MYSQL_USER
-          value: testuser
-        - name: MYSQL_PASSWORD
-          value: testpassword
-        ports:
-        - containerPort: 3306
-          name: mysql
-        volumeMounts:
-        - name: mysql-persistent-storage
-          mountPath: /var/lib/mysql
-      volumes:
-      - name: mysql-persistent-storage
-        persistentVolumeClaim:
-          claimName: mysql-pvc
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: mysql
-spec:
-  ports:
-  - port: 3306
-  selector:
-    app: mysql
-```
-
-#### 4.B.3 배포 및 데이터 설정
-
-**1. DB 연결 정보 및 루트 비밀번호 설정**
-MySQL 배포 및 앱 연결에 사용할 환경변수를 미리 설정합니다.
-
+**1. DB 연결 정보 설정**
 ```bash
 export DB_HOST="mysql"
 export DB_PORT="3306"
@@ -346,23 +270,25 @@ export DB_PASSWORD="testpassword"
 export DB_ROOT_PASSWORD="rootpassword" # MySQL 루트 비밀번호
 ```
 
-**2. MySQL 배포**
+**2. 스택 배포 (Kustomize)**
+
+환경에 맞는 명령어를 실행하여 배포합니다. (이때 App과 DB가 모두 배포됩니다)
+
 ```bash
-# (기존 PVC가 있다면 삭제 후 재생성 권장)
-kubectl delete pvc mysql-pvc --ignore-not-found
+# NKS (NHN Cloud)
+kubectl kustomize k8s/overlays/nks | envsubst | kubectl apply -f -
 
-# 1. 스토리지 클래스 및 PVC 생성
-kubectl apply -f k8s/storage-class.yml
-kubectl apply -f k8s/mysql-pvc.yml
+# GKS (Gabia Cloud)
+kubectl kustomize k8s/overlays/gks | envsubst | kubectl apply -f -
+```
 
-# 2. MySQL 배포 (환경변수 적용)
-envsubst < k8s/mysql-deployment.yml | kubectl apply -f -
-
-# 파드 이름 확인 및 상태 대기 (Running 될 때까지)
+**3. 파드 상태 확인**
+```bash
+# MySQL 파드가 Running 상태가 될 때까지 대기
 kubectl get pods -l app=mysql
 ```
 
-**2. 데이터 설정 (택 1)**
+**4. 데이터 설정 (택 1)**
 
 먼저 MySQL 파드의 이름을 변수에 저장합니다.
 ```bash
@@ -397,50 +323,58 @@ kubectl exec -it $MYSQL_POD -- sh -c 'mysql -uroot -prootpassword testdb < /tmp/
 
 ### 5.1 [로컬] 배포 파일 수정 및 적용
 
-`k8s/` 디렉토리의 YAML 파일들은 환경변수를 참조하도록 설정되어 있습니다.
-필요한 환경변수를 설정하고 `envsubst`를 사용하여 클러스터에 적용합니다.
+`k8s/` 디렉토리(base, overlays)의 리소스들은 환경변수를 참조하도록 설정되어 있습니다.
+Kustomize를 통해 구조를 병합하고, `envsubst`를 통해 환경 변수를 주입하여 배포합니다.
 
-**1. DB 연결 정보 확인**
-(4.A 또는 4.B 단계에서 이미 `DB_HOST` 등의 환경변수를 설정했습니다. 설정이 되어 있는지 확인합니다.)
+**1. DB 연결 정보 및 필수 변수 확인**
+(이전 단계에서 설정한 변수들이 유효한지 확인합니다.)
 
 ```bash
 echo $DB_HOST
-# 설정값이 출력되어야 합니다.
+echo $REGISTRY_URL
+# 설정값들이 출력되어야 합니다.
 ```
 
-**2. ConfigMap 및 Secret 생성**
-설정한 환경변수를 기반으로 ConfigMap과 Secret을 생성합니다.
+**2. 애플리케이션 시크릿 생성 (필수)**
+DB 비밀번호 등 민감한 정보를 담은 Secret을 생성합니다. (`app-secret`이 없으면 파드가 생성되지 않습니다.)
 
 ```bash
-# ConfigMap 생성
-envsubst < k8s/configmap.yml | kubectl apply -f -
-
-# Secret 생성 (secret-template.yml 사용)
-envsubst < k8s/secret-template.yml | kubectl apply -f -
-
-# Private Registry 접속용 Secret 생성 (필수)
-kubectl create secret docker-registry regcred \
-  --docker-server=$REGISTRY_URL \
-  --docker-username=$REGISTRY_USER \
-  --docker-password=$REGISTRY_PASSWORD \
+kubectl create secret generic app-secret \
+  --from-literal=db_user=$DB_USER \
+  --from-literal=db_password=$DB_PASSWORD \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-**3. 애플리케이션 및 서비스 배포**
-이미지 태그 등 배포 정보를 포함하여 Deployment를 적용하고, 서비스를 생성합니다.
+**3. 애플리케이션 배포 (Kustomize + envsubst)**
 
-배포 전, `scripts/check-image.sh` 스크립트를 실행하여 현재 설정된 `IMAGE_TAG`가 로컬에 존재하는지 확인합니다.
 
+환경별 Overlay를 선택하여 배포합니다.
+*(참고: 4.B 단계에서 이미 배포를 완료했다면 이 단계는 건너뛰거나, 검증 차원에서 다시 실행해도 무방합니다.)*
+
+**[NKS (NHN Cloud) 배포]**
 ```bash
 # 이미지 태그 확인
 ./scripts/check-image.sh
 
-# Deployment 적용
-envsubst < k8s/deployment.yml | kubectl apply -f -
-
-# Service 생성
-kubectl apply -f k8s/service.yml
+# 빌드 및 배포 (general-bs 스토리지 클래스 사용)
+kubectl kustomize k8s/overlays/nks | envsubst | kubectl apply -f -
 ```
+
+**[GKS (Gabia Cloud) 배포]**
+```bash
+# 이미지 태그 확인
+./scripts/check-image.sh
+
+# 빌드 및 배포 (ssd-iscsi 스토리지 클래스 사용)
+kubectl kustomize k8s/overlays/gks | envsubst | kubectl apply -f -
+```
+
+**4. 배포 확인**
+```bash
+kubectl get all
+kubectl get pvc
+```
+GKS의 경우 `kubectl get pvc mysql-pvc -o yaml` 명령으로 `storageClassName: ssd-iscsi`가 잘 적용되었는지 확인할 수 있습니다.
 
 ---
 

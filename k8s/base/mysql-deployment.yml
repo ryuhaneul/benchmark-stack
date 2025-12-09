@@ -18,13 +18,13 @@ spec:
         name: mysql
         env:
         - name: MYSQL_ROOT_PASSWORD
-          value: ${DB_ROOT_PASSWORD}
+          value: "${DB_ROOT_PASSWORD}"
         - name: MYSQL_DATABASE
-          value: ${DB_NAME}
+          value: "${DB_NAME}"
         - name: MYSQL_USER
-          value: ${DB_USER}
+          value: "${DB_USER}"
         - name: MYSQL_PASSWORD
-          value: ${DB_PASSWORD}
+          value: "${DB_PASSWORD}"
         ports:
         - containerPort: 3306
           name: mysql
