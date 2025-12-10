@@ -234,6 +234,9 @@ mysql -h <DB_HOST> -P <DB_PORT> -u <DB_USER> -p
 
 # 데이터 복원
 mysql -h <DB_HOST> -P <DB_PORT> -u <DB_USER> -p < testdb_backup.sql
+
+# 초기화 스키마
+mysql -h $DB_HOST -P $DB_PORT -u $DB_USER -p < app/db/schema.sql
 ```
 
 #### 4.A.4 [웹 콘솔] 보안 강화
@@ -276,10 +279,10 @@ export DB_ROOT_PASSWORD="rootpassword" # MySQL 루트 비밀번호
 
 ```bash
 # NKS (NHN Cloud)
-kubectl kustomize k8s/overlays/nks | envsubst | kubectl apply -f -
+kubectl kustomize k8s/overlays/nks/mysql | envsubst | kubectl apply -f -
 
 # GKS (Gabia Cloud)
-kubectl kustomize k8s/overlays/gks | envsubst | kubectl apply -f -
+kubectl kustomize k8s/overlays/gks/mysql | envsubst | kubectl apply -f -
 ```
 
 **3. 파드 상태 확인**
@@ -347,34 +350,47 @@ kubectl create secret generic app-secret \
 
 **3. 애플리케이션 배포 (Kustomize + envsubst)**
 
+4단계에서 선택한 옵션에 맞는 명령어를 실행합니다.
 
-환경별 Overlay를 선택하여 배포합니다.
-*(참고: 4.B 단계에서 이미 배포를 완료했다면 이 단계는 건너뛰거나, 검증 차원에서 다시 실행해도 무방합니다.)*
+> **⚠️ 주의: 옵션을 변경하는 경우**
+> 이전에 다른 옵션(예: MySQL → RDS)으로 배포했다면, 먼저 기존 리소스를 삭제해야 합니다:
+> ```bash
+> # MySQL 관련 리소스 삭제 (RDS로 전환 시)
+> kubectl delete deployment mysql
+> kubectl delete svc mysql
+> kubectl delete pvc mysql-pvc
+> ```
 
-**[NKS (NHN Cloud) 배포]**
+**[옵션 A] RDS/관리형 DB 사용 시:**
 ```bash
 # 이미지 태그 확인
 ./scripts/check-image.sh
 
-# 빌드 및 배포 (general-bs 스토리지 클래스 사용)
-kubectl kustomize k8s/overlays/nks | envsubst | kubectl apply -f -
+# NKS (NHN Cloud) - RDS 사용
+kubectl kustomize k8s/overlays/nks/rds | envsubst | kubectl apply -f -
+
+# GKS (Gabia Cloud) - 향후 RDS 지원 시
+kubectl kustomize k8s/overlays/gks/rds | envsubst | kubectl apply -f -
 ```
 
-**[GKS (Gabia Cloud) 배포]**
+**[옵션 B] Kubernetes 내 MySQL 컨테이너 사용 시:**
 ```bash
 # 이미지 태그 확인
 ./scripts/check-image.sh
 
-# 빌드 및 배포 (ssd-iscsi 스토리지 클래스 사용)
-kubectl kustomize k8s/overlays/gks | envsubst | kubectl apply -f -
+# NKS (NHN Cloud) - MySQL 컨테이너
+kubectl kustomize k8s/overlays/nks/mysql | envsubst | kubectl apply -f -
+
+# GKS (Gabia Cloud) - MySQL 컨테이너
+kubectl kustomize k8s/overlays/gks/mysql | envsubst | kubectl apply -f -
 ```
 
 **4. 배포 확인**
 ```bash
 kubectl get all
-kubectl get pvc
+kubectl get pvc  # MySQL 옵션 사용 시에만 PVC가 생성됩니다
 ```
-GKS의 경우 `kubectl get pvc mysql-pvc -o yaml` 명령으로 `storageClassName: ssd-iscsi`가 잘 적용되었는지 확인할 수 있습니다.
+옵션 B(MySQL 컨테이너)를 선택한 경우에만 `mysql-pvc`가 생성됩니다.
 
 ---
 
