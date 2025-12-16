@@ -1,0 +1,24 @@
+# Caddy configuration for HTTPS reverse proxy
+
+{
+	email {$ACME_EMAIL}
+	auto_https disable_redirects
+}
+
+# HTTPS on port 443 with TLS-ALPN-01 (no HTTP-01)
+https://{$DOMAIN}:443 {
+	reverse_proxy app:3000
+	encode gzip
+
+	tls {
+		issuer acme {
+			disable_http_challenge
+		}
+	}
+}
+
+# HTTP only on port 8080 (no TLS)
+http://:8080 {
+	reverse_proxy app:3000
+	encode gzip
+}

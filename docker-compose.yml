@@ -67,7 +67,6 @@ services:
       ACME_DNS_API_URL: ${ACME_DNS_API_URL:-http://acme-dns:8080}
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./nginx/certs:/etc/nginx/certs
       - ./nginx/logs:/var/log/nginx
@@ -80,6 +79,26 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Caddy Reverse Proxy (HTTPS with TLS-ALPN-01)
+  caddy:
+    image: caddy:2-alpine
+    container_name: test-caddy
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+    ports:
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    networks:
+      - app-network
 
   # acme-dns for DNS-01 challenges (optional)
   acme-dns:
@@ -105,4 +124,8 @@ volumes:
   mysql_data:
     driver: local
   acme_dns_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
     driver: local
