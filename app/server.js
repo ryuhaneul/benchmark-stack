@@ -382,6 +382,196 @@ app.get('/api/performance/cpu-multi', async (req, res) => {
   }
 });
 
+// 동시 접속 부하 테스트
+app.post('/api/performance/concurrent', async (req, res) => {
+  const { concurrency = 10, totalRequests = 100, targetEndpoint = '/health' } = req.body;
+
+  // 요청 제한 (서버 과부하 방지) - 최대 500까지 허용
+  const maxConcurrency = Math.min(concurrency, 500);
+  const maxTotalRequests = Math.min(totalRequests, 50000);
+
+  const startTime = Date.now();
+  const responseTimes = [];
+  let successCount = 0;
+  let failCount = 0;
+
+  // 동시 요청을 처리하는 함수
+  const makeRequest = async () => {
+    const requestStart = Date.now();
+    try {
+      // 내부 요청을 위해 http 모듈 사용
+      const http = require('http');
+
+      return new Promise((resolve) => {
+        const options = {
+          hostname: 'localhost',
+          port: PORT,
+          path: targetEndpoint,
+          method: 'GET',
+          timeout: 30000
+        };
+
+        const req = http.request(options, (response) => {
+          let data = '';
+          response.on('data', chunk => { data += chunk; });
+          response.on('end', () => {
+            const responseTime = Date.now() - requestStart;
+            if (response.statusCode >= 200 && response.statusCode < 300) {
+              successCount++;
+              responseTimes.push(responseTime);
+            } else {
+              failCount++;
+            }
+            resolve();
+          });
+        });
+
+        req.on('error', () => {
+          failCount++;
+          resolve();
+        });
+
+        req.on('timeout', () => {
+          failCount++;
+          req.destroy();
+          resolve();
+        });
+
+        req.end();
+      });
+    } catch (error) {
+      failCount++;
+    }
+  };
+
+  // 동시 실행 제어
+  const runConcurrentRequests = async () => {
+    let completedRequests = 0;
+    const activePromises = new Set();
+
+    while (completedRequests < maxTotalRequests) {
+      // 동시에 실행할 수 있는 만큼 요청 시작
+      while (activePromises.size < maxConcurrency && completedRequests + activePromises.size < maxTotalRequests) {
+        const promise = makeRequest().then(() => {
+          activePromises.delete(promise);
+        });
+        activePromises.add(promise);
+      }
+
+      // 최소 하나의 요청이 완료될 때까지 대기
+      if (activePromises.size > 0) {
+        await Promise.race(activePromises);
+        completedRequests++;
+      }
+    }
+
+    // 남은 요청 모두 완료 대기
+    await Promise.all(activePromises);
+    completedRequests += activePromises.size;
+  };
+
+  try {
+    await runConcurrentRequests();
+
+    const totalDuration = Date.now() - startTime;
+
+    // 응답 시간 통계 계산
+    responseTimes.sort((a, b) => a - b);
+    const calcPercentile = (arr, p) => {
+      if (arr.length === 0) return 0;
+      const index = Math.ceil(arr.length * p / 100) - 1;
+      return arr[Math.max(0, index)];
+    };
+
+    const avgResponseTime = responseTimes.length > 0
+      ? responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length
+      : 0;
+
+    const responseTimeStats = {
+      min: responseTimes.length > 0 ? responseTimes[0] : 0,
+      max: responseTimes.length > 0 ? responseTimes[responseTimes.length - 1] : 0,
+      avg: Math.round(avgResponseTime * 100) / 100,
+      p50: calcPercentile(responseTimes, 50),
+      p95: calcPercentile(responseTimes, 95),
+      p99: calcPercentile(responseTimes, 99)
+    };
+
+    const rps = totalDuration > 0 ? Math.round(successCount / (totalDuration / 1000) * 100) / 100 : 0;
+    const errorRate = maxTotalRequests > 0 ? Math.round(failCount / maxTotalRequests * 10000) / 100 : 0;
+
+    // 테스트 결과 평가 및 권장사항
+    // 기준: 오류율 1% 미만 & p95 < 500ms = 안정, 오류율 5% 이상 또는 p95 > 2000ms = 불안정
+    let status = 'stable'; // stable, warning, unstable
+    let recommendation = '';
+
+    if (errorRate < 1 && responseTimeStats.p95 < 500) {
+      status = 'stable';
+      recommendation = `✅ ${maxConcurrency}명 동시 접속 테스트 통과! 더 높은 동시 접속(${Math.round(maxConcurrency * 1.5)}명)으로 테스트해보세요.`;
+    } else if (errorRate < 5 && responseTimeStats.p95 < 2000) {
+      status = 'warning';
+      recommendation = `⚠️ ${maxConcurrency}명 동시 접속에서 약간의 지연이 있습니다. 현재 수준이 안정적인 상한선일 수 있습니다.`;
+    } else {
+      status = 'unstable';
+      const suggestedConcurrency = Math.max(1, Math.round(maxConcurrency * 0.7));
+      recommendation = `❌ ${maxConcurrency}명 동시 접속에서 성능 저하가 발생했습니다. ${suggestedConcurrency}명 이하로 줄여서 테스트해보세요.`;
+    }
+
+    const result = {
+      success: true,
+      test: 'Concurrent Load Test',
+      config: {
+        concurrency: maxConcurrency,
+        totalRequests: maxTotalRequests,
+        targetEndpoint
+      },
+      results: {
+        totalRequests: maxTotalRequests,
+        successCount,
+        failCount,
+        errorRate: errorRate + '%',
+        totalDuration,
+        rps,
+        responseTime: responseTimeStats
+      },
+      evaluation: {
+        status,
+        testedConcurrency: maxConcurrency,
+        recommendation
+      }
+    };
+
+    // DB에 결과 저장
+    if (req.query.skip_save !== 'true') {
+      try {
+        await pool.query(
+          'INSERT INTO performance_tests (test_type, iterations, duration_ms, throughput, details) VALUES (?, ?, ?, ?, ?)',
+          ['CONCURRENT', maxTotalRequests, totalDuration, rps, JSON.stringify({
+            concurrency: maxConcurrency,
+            targetEndpoint,
+            successCount,
+            failCount,
+            errorRate,
+            responseTime: responseTimeStats,
+            status,
+            recommendation
+          })]
+        );
+      } catch (error) {
+        console.error('Failed to save concurrent test result:', error);
+      }
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('Concurrent test error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Concurrent load test failed',
+      message: error.message
+    });
+  }
+});
+
 // 외부(클라이언트)에서 계산된 성능 테스트 결과 저장
 app.post('/api/performance/result', async (req, res) => {
   try {
