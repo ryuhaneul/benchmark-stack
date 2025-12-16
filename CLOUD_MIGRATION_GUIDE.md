@@ -359,39 +359,48 @@ kubectl create secret generic app-secret \
 
 **4. 애플리케이션 배포 (Kustomize + envsubst)**
 
-4단계에서 선택한 옵션에 맞는 명령어를 실행합니다.
+DB 옵션(mysql/rds)과 프록시 옵션(없음/nginx/caddy)을 선택하여 배포합니다.
 
 > **⚠️ 주의: 옵션을 변경하는 경우**
-> 이전에 다른 옵션(예: MySQL → RDS)으로 배포했다면, 먼저 기존 리소스를 삭제해야 합니다:
+> 이전에 다른 옵션으로 배포했다면, 먼저 기존 리소스를 삭제해야 합니다:
 > ```bash
-> # MySQL 관련 리소스 삭제 (RDS로 전환 시)
-> kubectl delete deployment mysql
-> kubectl delete svc mysql
-> kubectl delete pvc mysql-pvc
+> kubectl delete deployment --all
+> kubectl delete svc --field-selector 'metadata.name!=kubernetes'
+> kubectl delete pvc --all
 > ```
 
-**[옵션 A] RDS/관리형 DB 사용 시:**
+**[DB 선택] MySQL 컨테이너 vs RDS:**
+| 옵션 | 경로 | 설명 |
+|------|------|------|
+| MySQL 컨테이너 | `k8s/overlays/{cloud}/mysql` | K8s 내 MySQL Pod 사용 |
+| RDS/관리형 DB | `k8s/overlays/{cloud}/rds` | 외부 관리형 DB 사용 |
+
+**[프록시 선택] 없음 / Nginx / Caddy:**
+| 옵션 | 경로 | 설명 |
+|------|------|------|
+| 프록시 없음 | `k8s/overlays/{cloud}/{db}` | test-app LoadBalancer 직접 노출 |
+| Nginx | `k8s/overlays/{cloud}/{db}/nginx` | HTTP(80) 리버스 프록시 |
+| Caddy | `k8s/overlays/{cloud}/{db}/caddy` | HTTPS(443)+HTTP(80), TLS 자동 발급 |
+
+**배포 예시 (GKS + MySQL):**
 ```bash
-# 이미지 태그 확인
-./scripts/check-image.sh
+# 프록시 없이 기본 배포
+kubectl kustomize k8s/overlays/gks/mysql | envsubst | kubectl apply -f -
 
-# NKS (NHN Cloud) - RDS 사용
-kubectl kustomize k8s/overlays/nks/rds | envsubst | kubectl apply -f -
+# Nginx 프록시 추가
+kubectl kustomize k8s/overlays/gks/mysql/nginx | envsubst | kubectl apply -f -
 
-# GKS (Gabia Cloud) - 향후 RDS 지원 시
-kubectl kustomize k8s/overlays/gks/rds | envsubst | kubectl apply -f -
+# Caddy 프록시 추가 (HTTPS 자동)
+kubectl kustomize k8s/overlays/gks/mysql/caddy | envsubst | kubectl apply -f -
 ```
 
-**[옵션 B] Kubernetes 내 MySQL 컨테이너 사용 시:**
+**배포 예시 (NKS + RDS):**
 ```bash
-# 이미지 태그 확인
-./scripts/check-image.sh
+# 프록시 없이 기본 배포
+kubectl kustomize k8s/overlays/nks/rds | envsubst | kubectl apply -f -
 
-# NKS (NHN Cloud) - MySQL 컨테이너
-kubectl kustomize k8s/overlays/nks/mysql | envsubst | kubectl apply -f -
-
-# GKS (Gabia Cloud) - MySQL 컨테이너
-kubectl kustomize k8s/overlays/gks/mysql | envsubst | kubectl apply -f -
+# Caddy 프록시 추가
+kubectl kustomize k8s/overlays/nks/rds/caddy | envsubst | kubectl apply -f -
 ```
 
 **5. 배포 확인**
@@ -399,37 +408,52 @@ kubectl kustomize k8s/overlays/gks/mysql | envsubst | kubectl apply -f -
 kubectl get all
 kubectl get pvc  # MySQL 옵션 사용 시에만 PVC가 생성됩니다
 ```
-옵션 B(MySQL 컨테이너)를 선택한 경우에만 `mysql-pvc`가 생성됩니다.
 
 ---
 
 ## 6. 외부 접속 설정 (LoadBalancer)
 
-배포가 완료되면 Nginx와 Caddy가 각각 LoadBalancer 서비스로 외부에 노출됩니다.
+배포 옵션에 따라 서비스 구성이 달라집니다.
 
 ### 6.1 배포된 서비스 구성
 
-| 서비스 | 포트 | 역할 |
-|--------|------|------|
-| **nginx** | 80 | HTTP 리버스 프록시 |
-| **caddy** | 443, 8080 | HTTPS 리버스 프록시 (TLS 자동 발급) |
-| **test-app** | ClusterIP | 내부 앱 (프록시를 통해 접근) |
+**프록시 없음 (기본):**
+| 서비스 | 타입 | 포트 | 역할 |
+|--------|------|------|------|
+| test-app | LoadBalancer | 80 | 앱 직접 노출 |
+
+**Nginx 프록시 선택 시:**
+| 서비스 | 타입 | 포트 | 역할 |
+|--------|------|------|------|
+| nginx | LoadBalancer | 80 | HTTP 리버스 프록시 |
+| test-app | ClusterIP | 80 | 내부 앱 |
+
+**Caddy 프록시 선택 시:**
+| 서비스 | 타입 | 포트 | 역할 |
+|--------|------|------|------|
+| caddy | LoadBalancer | 443, 80 | HTTPS/HTTP 리버스 프록시 (TLS 자동) |
+| test-app | ClusterIP | 80 | 내부 앱 |
 
 ### 6.2 접속 주소 확인
 
 ```bash
 # LoadBalancer IP 확인 (EXTERNAL-IP 열)
-kubectl get svc nginx caddy
+kubectl get svc
+
+# 프록시 선택 시
+kubectl get svc nginx   # Nginx 선택 시
+kubectl get svc caddy   # Caddy 선택 시
 ```
 
 `EXTERNAL-IP` 항목에 IP 주소가 할당될 때까지 기다립니다. (몇 분 소요될 수 있음)
 
 **접속 방법:**
-- **HTTP**: `http://<NGINX_EXTERNAL_IP>/` (80 포트)
-- **HTTPS**: `https://<CADDY_EXTERNAL_IP>/` (443 포트)
-- **HTTP(Caddy)**: `http://<CADDY_EXTERNAL_IP>:8080/` (8080 포트)
+- **프록시 없음**: `http://<TEST_APP_EXTERNAL_IP>/`
+- **Nginx**: `http://<NGINX_EXTERNAL_IP>/`
+- **Caddy HTTP**: `http://<CADDY_EXTERNAL_IP>/`
+- **Caddy HTTPS**: `https://<DOMAIN>/` (도메인이 Caddy IP를 가리켜야 함)
 
-> **참고**: Caddy는 TLS-ALPN-01로 인증서를 자동 발급합니다. DOMAIN 환경변수에 설정한 도메인이 Caddy LoadBalancer IP를 가리켜야 합니다.
+> **참고**: Caddy는 HTTP-01 챌린지로 Let's Encrypt 인증서를 자동 발급합니다. DOMAIN 환경변수에 설정한 도메인이 Caddy LoadBalancer IP를 가리켜야 합니다.
 
 ---
 
