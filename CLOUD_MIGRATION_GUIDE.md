@@ -338,7 +338,16 @@ echo $REGISTRY_URL
 # 설정값들이 출력되어야 합니다.
 ```
 
-**2. 애플리케이션 시크릿 생성 (필수)**
+**2. 프록시(Nginx/Caddy) 환경변수 설정**
+Caddy HTTPS 인증서 발급을 위해 도메인과 이메일을 설정합니다.
+
+```bash
+export DOMAIN="example.com"           # 실제 도메인으로 변경
+export ACME_EMAIL="admin@example.com" # 실제 이메일로 변경
+```
+
+
+**3. 애플리케이션 시크릿 생성 (필수)**
 DB 비밀번호 등 민감한 정보를 담은 Secret을 생성합니다. (`app-secret`이 없으면 파드가 생성되지 않습니다.)
 
 ```bash
@@ -348,7 +357,7 @@ kubectl create secret generic app-secret \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-**3. 애플리케이션 배포 (Kustomize + envsubst)**
+**4. 애플리케이션 배포 (Kustomize + envsubst)**
 
 4단계에서 선택한 옵션에 맞는 명령어를 실행합니다.
 
@@ -385,7 +394,7 @@ kubectl kustomize k8s/overlays/nks/mysql | envsubst | kubectl apply -f -
 kubectl kustomize k8s/overlays/gks/mysql | envsubst | kubectl apply -f -
 ```
 
-**4. 배포 확인**
+**5. 배포 확인**
 ```bash
 kubectl get all
 kubectl get pvc  # MySQL 옵션 사용 시에만 PVC가 생성됩니다
@@ -396,40 +405,31 @@ kubectl get pvc  # MySQL 옵션 사용 시에만 PVC가 생성됩니다
 
 ## 6. 외부 접속 설정 (LoadBalancer)
 
-클라우드 CLI나 복잡한 Ingress Controller 설정 없이 가장 쉽게 외부 접속을 여는 방법은 `LoadBalancer` 타입의 서비스를 사용하는 것입니다.
+배포가 완료되면 Nginx와 Caddy가 각각 LoadBalancer 서비스로 외부에 노출됩니다.
 
-### 6.1 Service 수정 및 적용
+### 6.1 배포된 서비스 구성
 
-`k8s/service.yml` 파일을 열어 `type`을 `LoadBalancer`로 변경합니다. (기본 `ClusterIP`인 경우)
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: test-app
-spec:
-  type: LoadBalancer  # 중요: 클라우드 로드밸런서 자동 생성
-  ports:
-  - port: 80
-    targetPort: 3000
-    protocol: TCP
-  selector:
-    app: test-app
-```
-
-```bash
-# 기존 Service 설정 업데이트 (ClusterIP -> LoadBalancer)
-kubectl apply -f k8s/service.yml
-```
+| 서비스 | 포트 | 역할 |
+|--------|------|------|
+| **nginx** | 80 | HTTP 리버스 프록시 |
+| **caddy** | 443, 8080 | HTTPS 리버스 프록시 (TLS 자동 발급) |
+| **test-app** | ClusterIP | 내부 앱 (프록시를 통해 접근) |
 
 ### 6.2 접속 주소 확인
 
 ```bash
-kubectl get svc test-app -w
+# LoadBalancer IP 확인 (EXTERNAL-IP 열)
+kubectl get svc nginx caddy
 ```
 
-`EXTERNAL-IP` 항목에 IP 주소나 도메인이 할당될 때까지 기다립니다. (몇 분 소요될 수 있음)
-할당된 주소(`http://<EXTERNAL-IP>`)를 브라우저에 입력하여 접속합니다.
+`EXTERNAL-IP` 항목에 IP 주소가 할당될 때까지 기다립니다. (몇 분 소요될 수 있음)
+
+**접속 방법:**
+- **HTTP**: `http://<NGINX_EXTERNAL_IP>/` (80 포트)
+- **HTTPS**: `https://<CADDY_EXTERNAL_IP>/` (443 포트)
+- **HTTP(Caddy)**: `http://<CADDY_EXTERNAL_IP>:8080/` (8080 포트)
+
+> **참고**: Caddy는 TLS-ALPN-01로 인증서를 자동 발급합니다. DOMAIN 환경변수에 설정한 도메인이 Caddy LoadBalancer IP를 가리켜야 합니다.
 
 ---
 

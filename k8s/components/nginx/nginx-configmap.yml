@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+data:
+  nginx.conf: |
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        upstream app {
+            server test-app:80;
+        }
+
+        server {
+            listen 80;
+            server_name _;
+
+            location / {
+                proxy_pass http://app;
+            }
+
+            location /health {
+                access_log off;
+                return 200 "healthy";
+                add_header Content-Type text/plain;
+            }
+        }
+    }

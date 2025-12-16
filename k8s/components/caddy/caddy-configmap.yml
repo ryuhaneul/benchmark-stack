@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: caddy-config
+data:
+  Caddyfile: |
+    {
+      email ${ACME_EMAIL}
+    }
+
+    ${DOMAIN} {
+      reverse_proxy test-app:80
+      encode gzip
+    }
+
+    http://:80 {
+      reverse_proxy test-app:80
+      encode gzip
+    }

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  annotations:
+    loadbalancer.openstack.org/flavor-id: "adc12270-f56a-4ef1-bb00-429aad71ef6e"
+    loadbalancer.openstack.org/availability-zone: "KR1-Zone1-LB"
