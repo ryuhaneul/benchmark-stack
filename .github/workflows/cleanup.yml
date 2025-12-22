@@ -1,0 +1,28 @@
+name: Cleanup Old Images
+
+on:
+  # 1. 매일 새벽 4시(한국시간 오후 1시)에 자동 실행
+  schedule:
+    - cron: '0 4 * * *'
+  # 2. 필요할 때 버튼 눌러서 수동 실행 가능
+  workflow_dispatch:
+
+jobs:
+  delete-old-versions:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write # 삭제 권한 필수
+
+    steps:
+      - name: Delete old images
+        uses: actions/delete-package-versions@v5
+        with: 
+          # 패키지 이름 (hello-ghcr 등 본인 패키지명 입력)
+          package-name: 'test-stack-app'
+          package-type: 'container'
+          
+          # 남겨둘 개수 (최신 2개만 남기고 다 지움)
+          min-versions-to-keep: 2
+          
+          # (선택) 태그 없는 이미지(untagged)는 무조건 삭제
+          delete-only-untagged-versions: 'false'
