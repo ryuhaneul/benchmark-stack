@@ -11,6 +11,7 @@
 5. [애플리케이션 배포](#5-애플리케이션-배포)
 6. [외부 접속 설정 (LoadBalancer)](#6-외부-접속-설정-loadbalancer)
 7. [문제 해결](#7-문제-해결)
+8. [부록 A. AWS EKS 전용 가이드](#부록-a-aws-eks-전용-가이드)
 
 ---
 
@@ -485,3 +486,259 @@ kubectl get svc caddy   # Caddy 선택 시
     2.  Kubernetes Worker Node에 적용된 보안 그룹을 선택.
     3.  **Inbound 규칙**에 `TCP` 프로토콜, 포트 범위 `30000-32767` (또는 전체 `1-65535`)에 대해 `0.0.0.0/0` (또는 LoadBalancer 서브넷) 허용 규칙 추가.
     4.  `kubectl get svc test-app` 명령으로 할당된 NodePort(예: `80:31234/TCP`라면 31234)가 열려 있는지 확인.
+
+---
+
+## 부록 A. AWS EKS 전용 가이드
+
+> **참고**: 이 섹션은 AWS EKS 환경에 배포할 때 필요한 추가 설정을 다룹니다.
+> 기본 가이드의 범용 절차와 함께 사용하세요.
+
+### A.1 AWS CLI 및 추가 도구 설치
+
+EKS를 사용하려면 AWS CLI가 필요합니다.
+
+```bash
+# AWS CLI v2 설치 (Rocky Linux)
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+
+# 설치 확인
+aws --version
+
+# AWS 자격 증명 설정
+aws configure
+# AWS Access Key ID: <YOUR_ACCESS_KEY>
+# AWS Secret Access Key: <YOUR_SECRET_KEY>
+# Default region name: ap-northeast-2
+# Default output format: json
+
+# (선택) eksctl 설치 - EKS 관리 편의 도구
+curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+sudo mv /tmp/eksctl /usr/local/bin
+
+# Shell Completion
+echo 'source <(aws_completer)' >> ~/.bashrc
+echo 'source <(eksctl completion bash)' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### A.2 EKS 클러스터 연결
+
+#### [웹 콘솔] EKS 클러스터 생성
+
+1. AWS Console > **EKS** > **클러스터 생성**
+2. 권장 설정:
+   - **Kubernetes 버전**: 1.29 이상
+   - **클러스터 엔드포인트**: Public and Private
+   - **노드 그룹**: Managed Node Group, 2개 이상
+
+#### [로컬] kubeconfig 설정
+
+```bash
+# AWS CLI로 kubeconfig 자동 설정
+aws eks update-kubeconfig --region <REGION> --name <CLUSTER_NAME>
+
+# 연결 테스트
+kubectl get nodes
+```
+
+### A.3 ECR (Elastic Container Registry) 사용
+
+#### [웹 콘솔] ECR 레포지토리 생성
+
+1. AWS Console > **ECR** > **리포지토리 생성**
+2. 리포지토리 이름: `test-stack-app`
+3. 프라이빗 리포지토리로 생성
+
+#### [로컬] 환경변수 및 로그인
+
+```bash
+# AWS 계정 ID 및 리전 설정
+export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+export AWS_REGION="ap-northeast-2"
+
+# ECR 레지스트리 환경변수 설정
+export REGISTRY_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+export IMAGE_NAME="test-stack-app"
+export IMAGE_TAG="v1"
+
+# ECR 로그인 (토큰은 12시간 유효)
+aws ecr get-login-password --region $AWS_REGION | \
+  docker login --username AWS --password-stdin $REGISTRY_URL
+
+# 이미지 빌드 및 푸시
+docker compose build app
+docker push $REGISTRY_URL/$IMAGE_NAME:$IMAGE_TAG
+```
+
+#### ECR Image Pull Secret 생성
+
+```bash
+# ECR 로그인 토큰을 사용하여 Secret 생성
+kubectl create secret docker-registry regcred \
+  --docker-server=$REGISTRY_URL \
+  --docker-username=AWS \
+  --docker-password=$(aws ecr get-login-password --region $AWS_REGION) \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+> **⚠️ 주의**: ECR 토큰은 **12시간 후 만료**됩니다.
+> 만료된 경우 위 Secret 생성 명령을 다시 실행하세요.
+> 영구적인 해결책으로는 [ecr-login](https://github.com/awslabs/amazon-ecr-credential-helper) 또는
+> [external-secrets](https://external-secrets.io/latest/) 사용을 권장합니다.
+
+### A.4 EKS 필수 애드온 설치
+
+EKS에서 PVC(영구 볼륨)와 LoadBalancer/Ingress를 사용하려면 추가 컨트롤러가 필요합니다.
+
+#### 1. EBS CSI Driver (PVC 사용 시 필수)
+
+```bash
+# IAM OIDC Provider 활성화 (클러스터당 1회)
+eksctl utils associate-iam-oidc-provider --region $AWS_REGION --cluster <CLUSTER_NAME> --approve
+
+# EBS CSI Driver IAM 역할 생성
+eksctl create iamserviceaccount \
+  --name ebs-csi-controller-sa \
+  --namespace kube-system \
+  --cluster <CLUSTER_NAME> \
+  --region $AWS_REGION \
+  --role-name AmazonEKS_EBS_CSI_DriverRole \
+  --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy \
+  --approve
+
+# EBS CSI Driver 애드온 설치
+eksctl create addon --name aws-ebs-csi-driver --cluster <CLUSTER_NAME> --region $AWS_REGION \
+  --service-account-role-arn arn:aws:iam::${AWS_ACCOUNT_ID}:role/AmazonEKS_EBS_CSI_DriverRole \
+  --force
+
+# 설치 확인
+kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-ebs-csi-driver
+```
+
+#### 2. AWS Load Balancer Controller (Ingress/ALB 사용 시 필수)
+
+```bash
+# IAM 정책 다운로드
+curl -O https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
+
+# IAM 정책 생성
+aws iam create-policy \
+  --policy-name AWSLoadBalancerControllerIAMPolicy \
+  --policy-document file://iam_policy.json
+
+# Service Account 생성
+eksctl create iamserviceaccount \
+  --cluster=<CLUSTER_NAME> \
+  --namespace=kube-system \
+  --name=aws-load-balancer-controller \
+  --region $AWS_REGION \
+  --attach-policy-arn=arn:aws:iam::${AWS_ACCOUNT_ID}:policy/AWSLoadBalancerControllerIAMPolicy \
+  --approve
+
+# Helm으로 컨트롤러 설치
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update eks
+helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=<CLUSTER_NAME> \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller
+
+# 설치 확인
+kubectl get deployment -n kube-system aws-load-balancer-controller
+```
+
+### A.5 EKS 배포 예시
+
+기본 가이드의 5단계와 동일하나, EKS overlay 경로를 사용합니다.
+
+```bash
+# 환경변수 설정 (ECR 사용)
+export REGISTRY_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+export IMAGE_NAME="test-stack-app"
+export IMAGE_TAG="v1"
+
+# DB 연결 정보 설정
+export DB_HOST="mysql"           # 또는 RDS 엔드포인트
+export DB_PORT="3306"
+export DB_NAME="testdb"
+export DB_USER="testuser"
+export DB_PASSWORD="testpassword"
+export DB_ROOT_PASSWORD="rootpassword"
+
+# 프록시 설정 (Caddy 사용 시)
+export DOMAIN="example.com"
+export ACME_EMAIL="admin@example.com"
+
+# Secret 생성
+kubectl create secret generic app-secret \
+  --from-literal=db_user=$DB_USER \
+  --from-literal=db_password=$DB_PASSWORD \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+**[EKS + MySQL 컨테이너]**
+```bash
+# 기본 배포 (프록시 없음)
+kubectl kustomize k8s/overlays/eks/mysql | envsubst | kubectl apply -f -
+
+# Nginx 프록시 추가
+kubectl kustomize k8s/overlays/eks/mysql/nginx | envsubst | kubectl apply -f -
+
+# Caddy 프록시 추가 (HTTPS)
+kubectl kustomize k8s/overlays/eks/mysql/caddy | envsubst | kubectl apply -f -
+```
+
+**[EKS + RDS]**
+```bash
+# DB_HOST를 RDS 엔드포인트로 설정 후
+export DB_HOST="mydb.xxxx.ap-northeast-2.rds.amazonaws.com"
+
+# 기본 배포
+kubectl kustomize k8s/overlays/eks/rds | envsubst | kubectl apply -f -
+
+# Caddy 프록시 추가
+kubectl kustomize k8s/overlays/eks/rds/caddy | envsubst | kubectl apply -f -
+```
+
+### A.6 EKS 전용 문제 해결
+
+#### EBS CSI Driver 관련 PVC Pending
+*   **원인**: EBS CSI Driver 미설치 또는 IAM 권한 부족.
+*   **해결**:
+    ```bash
+    # CSI Driver 상태 확인
+    kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-ebs-csi-driver
+    
+    # PVC 이벤트 확인
+    kubectl describe pvc mysql-pvc
+    ```
+
+#### ALB Ingress 생성 안됨
+*   **원인**: AWS Load Balancer Controller 미설치.
+*   **해결**:
+    ```bash
+    # 컨트롤러 상태 확인
+    kubectl get deployment -n kube-system aws-load-balancer-controller
+    
+    # Ingress 이벤트 확인
+    kubectl describe ingress test-app-ingress
+    ```
+
+#### ECR 이미지 Pull 실패
+*   **원인**: 토큰 만료 (12시간) 또는 regcred Secret 없음.
+*   **해결**:
+    ```bash
+    # regcred Secret 재생성
+    kubectl create secret docker-registry regcred \
+      --docker-server=$REGISTRY_URL \
+      --docker-username=AWS \
+      --docker-password=$(aws ecr get-login-password --region $AWS_REGION) \
+      --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Pod 재시작
+    kubectl rollout restart deployment test-app
+    ```

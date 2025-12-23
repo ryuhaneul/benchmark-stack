@@ -3,16 +3,16 @@ kind: Ingress
 metadata:
   name: test-app-ingress
   annotations:
-    kubernetes.io/ingress.class: alb
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
     alb.ingress.kubernetes.io/ssl-redirect: '443'
-    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:region:account-id:certificate/certificate-id
+    alb.ingress.kubernetes.io/certificate-arn: "${ACM_CERTIFICATE_ARN}"
     alb.ingress.kubernetes.io/healthcheck-path: /health
 spec:
+  ingressClassName: alb
   rules:
-  - host: your-domain.com
+  - host: "${DOMAIN}"
     http:
       paths:
       - path: /
