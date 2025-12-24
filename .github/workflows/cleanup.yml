@@ -1,9 +1,9 @@
 name: Cleanup Old Images
 
 on:
-  # 1. 매일 새벽 4시(한국시간 오후 1시)에 자동 실행
+  # 1. 매일 KST 새벽 4시에 자동 실행
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '0 19 * * *'
   # 2. 필요할 때 버튼 눌러서 수동 실행 가능
   workflow_dispatch:
 
