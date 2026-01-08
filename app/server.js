@@ -33,35 +33,60 @@ let pool;
 
 const fs = require('fs');
 
-async function initializeDatabase() {
+try {
+  // 1. Try to connect with the given configuration
   try {
     pool = mysql.createPool(dbConfig);
-    console.log('✅ Database connection pool created');
-
-    // Test connection
     const connection = await pool.getConnection();
+    connection.release();
     console.log('✅ Database connection test successful');
+  } catch (err) {
+    if (err.code === 'ER_BAD_DB_ERROR') {
+      console.log(`⚠️ Database '${dbConfig.database}' not found. Attempting to create...`);
 
-    // Execute Schema Script
-    try {
-      const schemaPath = path.join(__dirname, 'db', 'schema.sql');
-      const schemaSql = fs.readFileSync(schemaPath, 'utf8');
-      const statements = schemaSql.split(';').filter(stmt => stmt.trim().length > 0);
+      // Connect without database selected
+      const { database, ...adminConfig } = dbConfig;
+      const adminConn = await mysql.createConnection(adminConfig);
 
-      for (const statement of statements) {
-        await connection.query(statement);
-      }
-      console.log('✅ Database schema initialized and seeded');
-    } catch (err) {
-      console.error('⚠️ Failed to initialize schema:', err.message);
-    } finally {
+      await adminConn.query(`CREATE DATABASE IF NOT EXISTS \`${database}\``);
+      console.log(`✅ Database '${database}' created successfully`);
+      await adminConn.end();
+
+      // Retry connection pool
+      pool = mysql.createPool(dbConfig);
+      const connection = await pool.getConnection();
       connection.release();
+      console.log('✅ Reconnected to new database');
+    } else {
+      throw err;
     }
-
-  } catch (error) {
-    console.error('❌ Database connection failed:', error.message);
-    process.exit(1);
   }
+
+  // Execute Schema Script
+  const connection = await pool.getConnection();
+  try {
+    const schemaPath = path.join(__dirname, 'db', 'schema.sql');
+    const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+    const statements = schemaSql.split(';').filter(stmt => stmt.trim().length > 0);
+
+    for (const statement of statements) {
+      // Skip CREATE DATABASE/USE statements if they exist (legacy support)
+      if (statement.toUpperCase().includes('CREATE DATABASE') || statement.toUpperCase().includes('USE ')) {
+        continue;
+      }
+      await connection.query(statement);
+    }
+    console.log('✅ Database schema initialized and seeded');
+  } catch (err) {
+    console.error('⚠️ Failed to initialize schema:', err.message);
+  } finally {
+    connection.release();
+  }
+
+} catch (error) {
+  console.error('❌ Database connection failed:', error.message);
+  process.exit(1);
+}
 }
 
 // Health check endpoint

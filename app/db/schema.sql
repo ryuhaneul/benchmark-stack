@@ -1,5 +1,6 @@
-CREATE DATABASE IF NOT EXISTS testdb;
-USE testdb;
+-- Database creation is now handled by server.js
+-- CREATE DATABASE IF NOT EXISTS testdb;
+-- USE testdb;
 
 -- Items table for testing CRUD operations
 CREATE TABLE IF NOT EXISTS items (
