@@ -35,31 +35,38 @@ const fs = require('fs');
 
 async function initializeDatabase() {
   try {
-    // 1. Try to connect with the given configuration
-    try {
-      pool = mysql.createPool(dbConfig);
-      const connection = await pool.getConnection();
-      connection.release();
-      console.log('✅ Database connection test successful');
-    } catch (err) {
-      if (err.code === 'ER_BAD_DB_ERROR') {
-        console.log(`⚠️ Database '${dbConfig.database}' not found. Attempting to create...`);
+    // Retry logic for database connection
+    const maxRetries = 30;
+    const retryInterval = 2000; // 2 seconds
 
-        // Connect without database selected
-        const { database, ...adminConfig } = dbConfig;
-        const adminConn = await mysql.createConnection(adminConfig);
-
-        await adminConn.query(`CREATE DATABASE IF NOT EXISTS \`${database}\``);
-        console.log(`✅ Database '${database}' created successfully`);
-        await adminConn.end();
-
-        // Retry connection pool
+    for (let i = 0; i < maxRetries; i++) {
+      try {
         pool = mysql.createPool(dbConfig);
         const connection = await pool.getConnection();
         connection.release();
-        console.log('✅ Reconnected to new database');
-      } else {
-        throw err;
+        console.log('✅ Database connection test successful');
+        break; // Connection successful
+      } catch (err) {
+        if (err.code === 'ER_BAD_DB_ERROR') {
+          console.log(`⚠️ Database '${dbConfig.database}' not found. Attempting to create...`);
+
+          // Connect without database selected
+          const { database, ...adminConfig } = dbConfig;
+          const adminConn = await mysql.createConnection(adminConfig);
+
+          await adminConn.query(`CREATE DATABASE IF NOT EXISTS \`${database}\``);
+          console.log(`✅ Database '${database}' created successfully`);
+          await adminConn.end();
+
+          // Retry immediately after creation
+          continue;
+        } else if (err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT' || err.code === 'ENOTFOUND') {
+          console.log(`⏳ Database not ready yet (Attempt ${i + 1}/${maxRetries}). Retrying in ${retryInterval / 1000}s...`);
+          if (i === maxRetries - 1) throw err;
+          await new Promise(res => setTimeout(res, retryInterval));
+        } else {
+          throw err;
+        }
       }
     }
 
