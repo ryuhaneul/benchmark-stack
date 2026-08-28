@@ -1,198 +1,109 @@
-# Docker Test Stack
+# benchmark-stack
 
-간단한 Docker 기반 테스트 프로젝트로 MySQL 데이터베이스와 CRUD API를 제공하며, HTTPS를 지원하고 클라우드 환경(EKS, RDS)으로 쉽게 마이그레이션 가능합니다.
+CPU·DB·동시접속 부하를 재고 결과를 기록하는 벤치마크 앱과, 그것을 **Docker Compose** 와 **Kubernetes(kustomize)** 양쪽으로 배포하는 매니페스트 모음.
 
-## � 버전 정보
+같은 애플리케이션을 단일 호스트 / 매니지드 쿠버네티스(EKS·GKE·NKS)에 각각 올려서, 환경별 성능과 오토스케일 동작을 비교하려고 만든 테스트 스택이다.
 
-### v1.0.0
-- **AppPaaS 호환성**: AppPaaS 등 클라우드 배포를 위한 `PORT` 환경 변수 지원 추가
-- **Docker/K8s 호환**: 기존 `APP_PORT` 환경 변수 지원 유지
+> [!WARNING]
+> **공개 인터넷에 노출하지 말 것.** 인증·레이트리밋이 전혀 없고, `/api/performance/*` 는 의도적으로 CPU 와 DB 를 소진시키는 엔드포인트다. `DELETE /api/performance` 는 기록 전체를 지운다. 사설망이나 로컬에서만 쓰는 것을 전제로 한다.
 
-## �🚀 빠른 시작
+---
 
-### 1. 환경 변수 설정
+## 구성
 
-```bash
-cp .env.example .env
-# .env 파일을 편집하여 도메인과 데이터베이스 설정
-nano .env
-```
+| 구성 요소 | 역할 |
+|---|---|
+| `app/` | Express + mysql2 벤치마크 서버 (`server.js`) + worker_threads 워커 (`worker.js`) + 웹 UI (`public/index.html`) |
+| `nginx/` | 리버스 프록시 (HTTP, 자체서명/Let's Encrypt 선택) |
+| `caddy/` | 리버스 프록시 (HTTPS, TLS-ALPN-01 자동 인증서) |
+| `acme-dns/` | DNS-01 챌린지용 acme-dns (와일드카드 인증서, compose profile) |
+| `k8s/` | kustomize base + components(nginx·caddy·mysql) + overlays(eks·gks·nks) |
+| `scripts/` | `hey` / `wrk` 외부 부하 스크립트, 결과를 앱 API 로 되돌려 저장 |
 
-### 2. Docker Compose로 실행
+프록시는 nginx / caddy 중 하나를 고르는 구조다. DB 는 컨테이너 MySQL 8 또는 매니지드 DB(RDS 등) 중 선택한다.
 
-```bash
-# 모든 서비스 시작
-docker compose up -d
-
-# 로그 확인
-docker compose logs -f
-```
-
-### 3. API 테스트
+## 빠른 시작 (Docker Compose)
 
 ```bash
-# Health check
-curl http://localhost:3000/health
-
-# 모든 아이템 조회
-curl http://localhost:3000/api/items
-
-# 아이템 생성
-curl -X POST http://localhost:3000/api/items \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Test Item","description":"Test","quantity":10,"price":19.99}'
-
-# 아이템 수정
-curl -X PUT http://localhost:3000/api/items/1 \
-  -H "Content-Type: application/json" \
-  -d '{"quantity":20}'
-
-# 아이템 삭제
-curl -X DELETE http://localhost:3000/api/items/1
-```
-
-## 📋 환경 변수
-
-| 변수 | 설명 | 기본값 |
-|------|------|--------|
-| `DOMAIN` | 도메인 이름 (HTTPS 필수) | `localhost` |
-| `ACME_EMAIL` | Let's Encrypt 이메일 | `admin@example.com` |
-| `MYSQL_ROOT_PASSWORD` | MySQL root 비밀번호 | `rootpassword` |
-| `MYSQL_DATABASE` | 데이터베이스 이름 | `testdb` |
-| `MYSQL_USER` | 데이터베이스 사용자 | `testuser` |
-| `MYSQL_PASSWORD` | 데이터베이스 비밀번호 | `testpassword` |
-
-## 🔐 HTTPS 설정
-
-### 로컬 개발 (Self-Signed)
-
-`DOMAIN=localhost`로 설정하면 자동으로 자체 서명 인증서가 생성됩니다.
-
-### 프로덕션 (Let's Encrypt)
-
-1. 도메인 이름 설정:
-```bash
-# .env 파일에서
-DOMAIN=yourdomain.com
-ACME_EMAIL=your-email@example.com
-```
-
-2. DNS 설정:
-   - A 레코드: `yourdomain.com` → 서버 IP
-   - 포트 80, 443 오픈
-
-3. 서비스 시작:
-```bash
+cp .env.example .env      # 최소한 MYSQL_* 비밀번호는 바꾼다
 docker compose up -d
 ```
 
-Nginx가 자동으로 Let's Encrypt 인증서를 발급받습니다.
+앱은 `http://localhost:3000`, 웹 UI 는 같은 주소의 루트에서 열린다. MySQL 스키마와 시드 데이터 1000건은 앱 기동 시 자동 생성된다(`app/db/schema.sql`).
 
-## 🛠️ 서비스 구성
+DNS-01 이 필요하면 `docker compose --profile acme-dns up -d`.
 
-- **app**: Node.js Express API (포트 3000)
-- **mysql**: MySQL 8.0 데이터베이스 (포트 3306)
-- **nginx**: Nginx 리버스 프록시 with HTTPS (포트 80, 443)
-- **acme-dns**: DNS-01 challenge용 (선택사항, 프로파일: `acme-dns`)
-
-## 📡 API 엔드포인트
+## 벤치마크 API
 
 | 메서드 | 경로 | 설명 |
-|--------|------|------|
-| GET | `/health` | 헬스 체크 |
-| GET | `/api/items` | 모든 아이템 조회 |
-| GET | `/api/items/:id` | 특정 아이템 조회 |
-| POST | `/api/items` | 아이템 생성 |
-| PUT | `/api/items/:id` | 아이템 수정 |
-| DELETE | `/api/items/:id` | 아이템 삭제 |
+|---|---|---|
+| GET | `/health` | 헬스체크 |
+| GET | `/api/performance/cpu` | 단일 스레드 소수 계산. `?iterations=` (기본 1억) |
+| GET | `/api/performance/cpu-multi` | worker_threads 병렬 소수 계산. `?iterations=` `?threads=` (기본 4) |
+| GET | `/api/performance/db-read` | 반복 SELECT. `?iterations=` (기본 50000) `?threads=` |
+| POST | `/api/performance/db-write` | 반복 INSERT |
+| POST | `/api/performance/concurrent` | 자체 동시 요청 부하. body `{concurrency, totalRequests, targetEndpoint}` (상한 500 / 50000) |
+| POST | `/api/performance/result` | 외부에서 측정한 결과를 저장 (부하 스크립트가 사용) |
+| GET | `/api/performance/history` | 결과 이력. `?limit=` (기본 50) |
+| DELETE | `/api/performance/:id` | 개별 삭제 |
+| DELETE | `/api/performance` | 전체 삭제 |
 
-## 🧪 데이터베이스 테스트
-
-### MySQL CLI 접속
-
-```bash
-docker compose exec mysql mysql -u testuser -p testdb
-# 비밀번호 입력: testpassword
-```
-
-### 쿼리 예제
-
-```sql
--- 모든 데이터 조회
-SELECT * FROM items;
-
--- 데이터 삽입
-INSERT INTO items (name, description, quantity, price) 
-VALUES ('New Item', 'Test description', 5, 15.99);
-
--- 데이터 수정
-UPDATE items SET quantity = 20 WHERE id = 1;
-
--- 데이터 삭제
-DELETE FROM items WHERE id = 1;
-```
-
-## ☁️ 클라우드 마이그레이션
-
-프로젝트는 AWS EKS와 RDS로 쉽게 마이그레이션할 수 있도록 설계되었습니다.
-
-자세한 내용은 [MIGRATION.md](MIGRATION.md)를 참조하세요.
-
-### 빠른 가이드
-
-1. **RDS 설정**: MySQL 호환 RDS 인스턴스 생성
-2. **ECR에 이미지 푸시**: Docker 이미지 빌드 및 푸시
-3. **EKS 배포**: `k8s/` 디렉토리의 매니페스트 사용
-4. **환경 변수 업데이트**: ConfigMap과 Secret으로 DB 정보 설정
-
-## 📁 프로젝트 구조
-
-```
-test-stack/
-├── app/                    # Node.js 애플리케이션
-│   ├── server.js          # Express 서버
-│   ├── package.json       # 의존성
-│   ├── Dockerfile         # 앱 이미지
-│   └── db/
-│       └── schema.sql     # 데이터베이스 스키마
-├── nginx/                 # Nginx 설정
-│   ├── Dockerfile
-│   ├── nginx.conf.template
-│   └── entrypoint.sh
-├── k8s/                   # Kubernetes 매니페스트
-│   ├── deployment.yml
-│   ├── service.yml
-│   ├── ingress.yml
-│   ├── configmap.yml
-│   └── secret.example.yml
-├── acme-dns/              # acme-dns 설정
-│   └── config.cfg
-├── docker-compose.yml     # Docker Compose 설정
-├── .env.example          # 환경 변수 템플릿
-└── README.md
-```
-
-## 🔧 유용한 명령어
+측정 결과는 `performance_tests` 테이블에 자동 저장된다. 저장을 건너뛰려면 `?skip_save=true`.
 
 ```bash
-# 서비스 중지
-docker compose down
-
-# 볼륨 포함 완전 삭제
-docker compose down -v
-
-# 특정 서비스 재시작
-docker compose restart app
-
-# 로그 확인
-docker compose logs app
-docker compose logs nginx
-docker compose logs mysql
-
-# 컨테이너 상태 확인
-docker compose ps
+curl "http://localhost:3000/api/performance/cpu?iterations=50000000"
+curl "http://localhost:3000/api/performance/cpu-multi?iterations=100000000&threads=8"
+curl "http://localhost:3000/api/performance/history?limit=10"
 ```
 
-## 📝 라이센스
+## 외부 부하 스크립트
 
-MIT License
+앱 내장 부하는 서버 자신의 리소스를 쓰기 때문에, 실제 처리량은 별도 호스트에서 `hey` / `wrk` 로 거는 쪽이 정확하다. 스크립트는 측정 후 대상 호스트의 `/api/performance/result` 로 결과를 POST 한다.
+
+```bash
+./scripts/hey-benchmark.sh  http://target/health 5000 500 4     # 요청수 동시성 CPU코어
+./scripts/wrk-benchmark.sh  http://target/health 4 500 10s      # 스레드 커넥션 시간
+./scripts/hey-find-optimal.sh http://target/health              # 동시성 올려가며 한계점 탐색
+```
+
+## Kubernetes
+
+kustomize 로 구성돼 있다. `base` 는 앱 Deployment / Service / Ingress(ALB) / HPA(CPU 70%, 1~5 replica) / ConfigMap 이고, 프록시와 DB 는 `components` 로 붙인다.
+
+```bash
+kubectl apply -k k8s/overlays/eks/mysql/nginx     # EKS + 컨테이너 MySQL + nginx
+kubectl apply -k k8s/overlays/eks/rds/caddy       # EKS + RDS + caddy
+kubectl apply -k k8s/overlays/nks/rds             # NKS + 매니지드 DB
+```
+
+오버레이는 `eks` / `gks` / `nks` 별로 StorageClass 와 Service 타입, PVC 를 패치한다.
+
+시크릿은 커밋하지 않는다. `k8s/secret.example.yml` 를 참고해 직접 만든다.
+
+```bash
+kubectl create secret generic app-secret \
+  --from-literal=db_user=... --from-literal=db_password=...
+```
+
+## 환경 변수
+
+`.env.example` 참고.
+
+| 변수 | 설명 | 기본값 |
+|---|---|---|
+| `MYSQL_ROOT_PASSWORD` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` | MySQL 자격증명 | 예시값 — **반드시 변경** |
+| `DOMAIN` | 프록시가 사용할 도메인 | `localhost` |
+| `ACME_EMAIL` | Let's Encrypt 등록 이메일 | — |
+| `USE_LETSENCRYPT` | `false` 면 자체서명 인증서 | `false` |
+| `USE_ACME_DNS` / `ACME_DNS_API_URL` | DNS-01 사용 여부 | `false` |
+| `PORT` / `APP_PORT` | 앱 포트 (PaaS 는 `PORT` 를 주입) | `3000` |
+
+## 문서
+
+- [`MIGRATION.md`](MIGRATION.md) — Compose → Kubernetes 이행
+- [`CLOUD_MIGRATION_GUIDE.md`](CLOUD_MIGRATION_GUIDE.md) — EKS / RDS 상세 절차
+- [`ACME_DNS_GUIDE.md`](ACME_DNS_GUIDE.md) — acme-dns 등록과 와일드카드 인증서
+
+## 라이선스
+
+[MIT](LICENSE)

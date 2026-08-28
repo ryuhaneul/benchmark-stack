@@ -24,7 +24,7 @@ jobs:
           # 남겨둘 개수 (최신 2개만 남기고 다 지움)
           min-versions-to-keep: 2
 
-          token: ${{ secrets.TEST_GHCR }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           
           # (선택) 태그 없는 이미지(untagged)는 무조건 삭제
           delete-only-untagged-versions: 'false'
