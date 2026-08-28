@@ -1,7 +1,7 @@
 # --------------------------------------------------------
 # [Stage 1] Builder: 의존성 설치 전용 (최종 이미지에 포함 안됨)
 # --------------------------------------------------------
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /usr/src/app
 
@@ -14,7 +14,7 @@ RUN ([ -f package-lock.json ] && npm ci --only=production || npm install --produ
 # --------------------------------------------------------
 # [Stage 2] Production: 실제 실행용 경량 이미지
 # --------------------------------------------------------
-FROM node:20-alpine
+FROM node:24-alpine
 
 # 1. OS 보안 패치 + 불필요한 도구 제거
 RUN apk upgrade --no-cache && \
