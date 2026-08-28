@@ -8,9 +8,8 @@ WORKDIR /usr/src/app
 # 패키지 파일만 먼저 복사 (캐시 효율 극대화)
 COPY package*.json ./
 
-# npm 최신화 및 프로덕션 의존성 설치 (lock 파일 있으면 ci, 없으면 install)
-RUN npm install -g npm@latest && \
-    ([ -f package-lock.json ] && npm ci --only=production || npm install --production)
+# 프로덕션 의존성 설치 (lock 파일 있으면 ci, 없으면 install)
+RUN ([ -f package-lock.json ] && npm ci --only=production || npm install --production)
 
 # --------------------------------------------------------
 # [Stage 2] Production: 실제 실행용 경량 이미지
