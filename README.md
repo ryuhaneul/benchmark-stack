@@ -33,6 +33,42 @@ docker compose up -d
 
 DNS-01 이 필요하면 `docker compose --profile acme-dns up -d`.
 
+## 실행 가이드 (웹 UI로 벤치마크 돌려보기)
+
+프록시 없이 앱과 MySQL 만 띄워 웹 UI 에서 직접 계측하는 최소 절차다. 아래 스크린샷은 이 절차 그대로 4 vCPU / 15 GiB 리눅스 컨테이너에서 찍은 실제 결과이며, 수치는 환경마다 다르다.
+
+**1. 기동**
+
+```bash
+cp .env.example .env
+docker compose up -d --build mysql app
+docker compose ps                     # 두 컨테이너 모두 (healthy) 인지 확인
+curl http://localhost:3000/health     # {"status":"healthy",...}
+```
+
+**2. 웹 UI 열기** — 브라우저에서 `http://localhost:3000`. 우측 상단이 `서버 정상` 이면 DB 연결까지 끝난 상태다.
+
+![웹 UI 첫 화면](docs/images/01-overview.png)
+
+**3. 단위 계측 (01)** — CPU 단일 / CPU 다중 / DB 읽기 / DB 쓰기 카드에서 반복 수·스레드를 정하고 `실행`. 소요 시간은 반복 수에 비례하므로(위 환경에서 CPU 단일 2천만 회 ≈ 0.46초), 처음에는 반복 수를 줄여 감을 잡은 뒤 기본값으로 올리는 것을 권한다. 스크린샷에서는 CPU 단일 2천만, CPU 다중 4천만 / 4 스레드, DB 읽기 5천 / 4 스레드, DB 쓰기 2천 / 4 스레드로 돌렸다.
+
+**4. 동시 접속 부하 (02)** — 동시 연결·총 요청·대상 경로를 정하고 `부하 시작`. RPS, 평균 / p95 / p99 응답시간, 오류율과 판정이 표시된다. 서버가 자기 자신에게 요청을 거는 방식이라 실제 처리량보다 낮게 나오므로, 정확한 수치는 [외부 부하 스크립트](#외부-부하-스크립트)로 잰다.
+
+![동시 접속 부하 결과 (동시 50 / 2,000 요청)](docs/images/02-concurrent.png)
+
+**5. 계측 기록 (04)** — 모든 결과는 `performance_tests` 테이블에 저장되고 하단 표에 쌓인다. `새로고침` 으로 다시 불러오고, 행별 `삭제` 또는 `전체 삭제` 로 정리한다. 같은 내용은 `GET /api/performance/history` 로도 받을 수 있다.
+
+![계측 기록](docs/images/03-history.png)
+
+**6. 종합 계측 (03)** — `스윕 시작` 은 네 단위 계측을 10회 반복해 `*_AVG` 로 평균을 기록한다. 세트 사이 대기가 있어 수십 분이 걸리므로 환경 간 비교용 최종 측정에 쓴다.
+
+**7. 정리**
+
+```bash
+docker compose down        # 컨테이너만 정리
+docker compose down -v     # MySQL 볼륨까지 삭제 (기록 초기화)
+```
+
 ## 벤치마크 API
 
 | 메서드 | 경로 | 설명 |
